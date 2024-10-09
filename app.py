@@ -8,7 +8,9 @@ import moviepy.editor as mp
 from pydub import AudioSegment
 from PIL import Image
 import numpy as np
-
+import os
+import tempfile
+import uuid
 
 torch.set_float32_matmul_precision(["high", "highest"][0])
 
@@ -48,9 +50,15 @@ def fn(vid):
     # Add the original audio back to the processed video
     processed_video = processed_video.set_audio(audio)
 
-    # Return the processed video
-    return processed_video
+    # Save the processed video to a temporary file
+    temp_dir = "temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    unique_filename = str(uuid.uuid4()) + ".mp4"
+    temp_filepath = os.path.join(temp_dir, unique_filename)
+    processed_video.write_videofile(temp_filepath, codec="libx264")
 
+    # Return the path to the temporary file
+    return temp_filepath
 
 
 def process(image):
