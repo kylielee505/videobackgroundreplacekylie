@@ -44,6 +44,7 @@ def fn(vid, fps, color):
         pil_image = Image.fromarray(frame)
         processed_image = process(pil_image, color)
         processed_frames.append(np.array(processed_image))
+        yield processed_image, gr.update(visible=False)
 
     # Create a new video from the processed frames
     processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
@@ -59,7 +60,7 @@ def fn(vid, fps, color):
     processed_video.write_videofile(temp_filepath, codec="libx264")
 
     # Return the path to the temporary file
-    return temp_filepath
+    yield gr.update(visible=False), temp_filepath
 
 
 def process(image, color_hex):
@@ -96,14 +97,19 @@ def process_file(f, color="#00FF00"):
 with gr.Blocks() as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video")
-        out_video = gr.Video(label="Output Video")  
+        stream_image = gr.Image(label="Streaming Output")
+        out_video = gr.Video(label="Final Output Video")  
     submit_button = gr.Button("Change Background")
     with gr.Row():
         fps_slider = gr.Slider(minimum=1, maximum=60, step=1, value=12, label="Output FPS")
         color_picker = gr.ColorPicker(label="Background Color", value="#00FF00")
 
     submit_button.click(
-        fn, inputs=[in_video, fps_slider, color_picker], outputs=out_video
+        fn=lambda: gr.update(visible=True), inputs=None, outputs=[stream_image]
+    ).then(
+        fn=lambda: gr.update(visible=False), inputs=None, outputs=[out_video],
+    ).then(
+        fn, inputs=[in_video, fps_slider, color_picker], outputs=[stream_image, out_video]
     )
 
 if __name__ == "__main__":
