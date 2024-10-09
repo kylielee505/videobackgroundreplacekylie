@@ -47,7 +47,7 @@ def fn(vid, fps, color):
         processed_frames_no_bg.append(np.array(processed_image))  # Save no-background frame
         
         # Compose with background for changed background video
-        background = Image.new("RGBA", pil_image.size, color + (255,))
+        background = Image.new("RGBA", pil_image.size, color + str((255,)))
         composed_image = Image.composite(pil_image, background, mask)
         processed_frames_changed_bg.append(np.array(composed_image))
 
