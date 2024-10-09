@@ -62,7 +62,7 @@ def fn(vid, fps=12, color="#00FF00"):
     
     yield gr.update(visible=False), gr.update(visible=True)
     # Return the path to the temporary file
-    yield None, temp_filepath
+    yield processed_image, temp_filepath
 
 
 def process(image, color_hex):
