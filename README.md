@@ -4,7 +4,7 @@ emoji: 👁
 colorFrom: yellow
 colorTo: green
 sdk: gradio
-sdk_version: 5.0.0
+sdk_version: 5.0.0b6
 app_file: app.py
 pinned: false
 short_description: remove background from images
