@@ -1,5 +1,4 @@
 import gradio as gr
-from gradio_imageslider import ImageSlider
 from loadimg import load_img
 import spaces
 from transformers import AutoModelForImageSegmentation
@@ -25,7 +24,7 @@ transform_image = transforms.Compose(
     ]
 )
 
-
+@spaces.GPU
 def fn(vid):
     # Load the video using moviepy
     video = mp.VideoFileClip(vid)
@@ -53,7 +52,7 @@ def fn(vid):
     return processed_video
 
 
-@spaces.GPU
+
 def process(image):
     image_size = image.size
     input_images = transform_image(image).unsqueeze(0).to("cuda")
@@ -86,7 +85,6 @@ in_video = gr.Video(label="birefnet")
 out_video = gr.Video()
 
 
-url = "https://hips.hearstapps.com/hmg-prod/images/gettyimages-1229892983-square.jpg"
 demo = gr.Interface(
     fn, inputs=in_video, outputs=out_video, api_name="video"
 )
