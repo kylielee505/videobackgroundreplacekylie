@@ -28,9 +28,13 @@ transform_image = transforms.Compose(
 
 
 @spaces.GPU
-def fn(vid, fps=12, color="#00FF00"):
+def fn(vid, fps=0, color="#00FF00"):
     # Load the video using moviepy
     video = mp.VideoFileClip(vid)
+
+    # Load original fps if fps value is equal to 0
+    if fps == 0:
+      fps = video.fps
 
     # Extract audio from the video
     audio = video.audio
@@ -94,7 +98,7 @@ with gr.Blocks() as demo:
         out_video = gr.Video(label="Final Output Video")  
     submit_button = gr.Button("Change Background")
     with gr.Row():
-        fps_slider = gr.Slider(minimum=1, maximum=60, step=1, value=12, label="Output FPS")
+        fps_slider = gr.Slider(minimum=0, maximum=60, step=1, value=0, label="Output FPS (0 will inherit the original fps value)")
         color_picker = gr.ColorPicker(label="Background Color", value="#00FF00")
 
     examples = gr.Examples(["rickroll-2sec.mp4"], inputs=in_video, outputs=[stream_image, out_video], fn=fn, cache_examples=True, cache_mode="eager")
