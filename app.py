@@ -97,7 +97,7 @@ with gr.Blocks() as demo:
         fps_slider = gr.Slider(minimum=1, maximum=60, step=1, value=12, label="Output FPS")
         color_picker = gr.ColorPicker(label="Background Color", value="#00FF00")
 
-    examples = gr.Examples(["rickroll-2sec.mp4"], inputs=in_video, outputs=[stream_image, out_video], fn=fn, cache_examples=True, cache_mode="lazy")
+    examples = gr.Examples(["rickroll-2sec.mp4"], inputs=in_video, outputs=[stream_image, out_video], fn=fn, cache_examples=True, cache_mode="eager")
 
     submit_button.click(
         fn, inputs=[in_video, fps_slider, color_picker], outputs=[stream_image, out_video]
