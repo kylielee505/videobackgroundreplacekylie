@@ -28,7 +28,7 @@ transform_image = transforms.Compose(
 
 
 @spaces.GPU
-def fn(vid, fps, color):
+def fn(vid, fps=12, color="#00FF00"):
     # Load the video using moviepy
     video = mp.VideoFileClip(vid)
 
@@ -40,6 +40,7 @@ def fn(vid, fps, color):
 
     # Process each frame for background removal
     processed_frames = []
+    yield gr.update(visible=True), gr.update(visible=False)
     for frame in frames:
         pil_image = Image.fromarray(frame)
         processed_image = process(pil_image, color)
@@ -86,15 +87,6 @@ def process(image, color_hex):
     return image
 
 
-def process_file(f, color="#00FF00"):
-    name_path = f.rsplit(".", 1)[0] + ".png"
-    im = load_img(f, output_type="pil")
-    im = im.convert("RGB")
-    transparent = process(im, color)
-    transparent.save(name_path)
-    return name_path
-
-
 with gr.Blocks() as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video")
@@ -105,13 +97,11 @@ with gr.Blocks() as demo:
         fps_slider = gr.Slider(minimum=1, maximum=60, step=1, value=12, label="Output FPS")
         color_picker = gr.ColorPicker(label="Background Color", value="#00FF00")
 
+    examples = gr.Examples(["rickroll-2sec.mp4"], inputs=in_video, outputs=[stream_image, out_video], fn=fn, cache_examples=True, cache_mode="lazy")
+
     submit_button.click(
-        fn=lambda: gr.update(visible=True), inputs=None, outputs=[stream_image]
-    ).then(
-        fn=lambda: gr.update(visible=False), inputs=None, outputs=[out_video],
-    ).then(
         fn, inputs=[in_video, fps_slider, color_picker], outputs=[stream_image, out_video]
     )
-
+    
 if __name__ == "__main__":
     demo.launch(show_error=True)
