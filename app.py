@@ -44,7 +44,7 @@ def fn(vid, fps, color):
         pil_image = Image.fromarray(frame)
         processed_image = process(pil_image, color)
         processed_frames.append(np.array(processed_image))
-        yield processed_image, gr.update(visible=False)
+        yield processed_image, None
 
     # Create a new video from the processed frames
     processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
@@ -58,9 +58,10 @@ def fn(vid, fps, color):
     unique_filename = str(uuid.uuid4()) + ".mp4"
     temp_filepath = os.path.join(temp_dir, unique_filename)
     processed_video.write_videofile(temp_filepath, codec="libx264")
-
+    
+    yield gr.update(visible=False), gr.update(visible=True)
     # Return the path to the temporary file
-    yield gr.update(visible=False), temp_filepath
+    yield None, temp_filepath
 
 
 def process(image, color_hex):
@@ -97,7 +98,7 @@ def process_file(f, color="#00FF00"):
 with gr.Blocks() as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video")
-        stream_image = gr.Image(label="Streaming Output")
+        stream_image = gr.Image(label="Streaming Output", visible=False)
         out_video = gr.Video(label="Final Output Video")  
     submit_button = gr.Button("Change Background")
     with gr.Row():
