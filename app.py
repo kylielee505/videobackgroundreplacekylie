@@ -112,11 +112,13 @@ def process(image, bg):
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
 
-    if bg.startswith("#"):
+    if isinstance(bg, str) and bg.startswith("#"):
         color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
         background = Image.new("RGBA", image_size, color_rgb + (255,))
-    else:
+    elif isinstance(bg, Image.Image):
         background = bg.convert("RGBA").resize(image_size)
+    else:
+        background = Image.open(bg).convert("RGBA").resize(image_size)
 
     # Composite the image onto the background using the mask
     image = Image.composite(image, background, mask)
@@ -126,10 +128,14 @@ def process(image, bg):
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     with gr.Row():
-        in_video = gr.Video(label="Input Video")
+        in_video = gr.Video(label="Input Video", interactive=True    if isinstance(bg, str) and bg.startswith("#"):
+        color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
+        background = Image.new("RGBA", image_size, color_rgb + (255,))
+    elif isinstance(bg, Image.Image):
+        background = bg.convert("RGBA").resize(image_size))
         stream_image = gr.Image(label="Streaming Output", visible=False)
         out_video = gr.Video(label="Final Output Video")
-    submit_button = gr.Button("Change Background")
+    submit_button = gr.Button("Change Background", interactive=True)
     with gr.Row():
         fps_slider = gr.Slider(
             minimum=0,
@@ -137,13 +143,14 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
             step=1,
             value=0,
             label="Output FPS (0 will inherit the original fps value)",
+            interactive=True
         )
-        bg_type = gr.Radio(["Color", "Image", "Video"], label="Background Type", value="Color")
-        color_picker = gr.ColorPicker(label="Background Color", value="#00FF00", visible=True)
-        bg_image = gr.Image(label="Background Image", type="filepath", visible=False)
-        bg_video = gr.Video(label="Background Video", visible=False)
+        bg_type = gr.Radio(["Color", "Image", "Video"], label="Background Type", value="Color", interactive=True)
+        color_picker = gr.ColorPicker(label="Background Color", value="#00FF00", visible=True, interactive=True)
+        bg_image = gr.Image(label="Background Image", type="filepath", visible=False, interactive=True)
+        bg_video = gr.Video(label="Background Video", visible=False, interactive=True)
         with gr.Column(visible=False) as video_handling_options:
-            video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down")
+            video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down", interactive=True)
 
     def update_visibility(bg_type):
         if bg_type == "Color":
