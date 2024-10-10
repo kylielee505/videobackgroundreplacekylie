@@ -94,7 +94,7 @@ def process(image, bg):
     return image
 
 
-with gr.Blocks(theme=gr.themes.Ocean(primary_hue="blue")) as demo:
+with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video")
         stream_image = gr.Image(label="Streaming Output", visible=False)
