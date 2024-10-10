@@ -28,7 +28,7 @@ transform_image = transforms.Compose(
 
 
 @spaces.GPU
-def fn(vid, fps=0, bg_type="Color", color="#00FF00", bg_image=None):
+def fn(vid, bg_image=None, fps=0, bg_type="Color", color="#00FF00"):
     # Load the video using moviepy
     video = mp.VideoFileClip(vid)
 
@@ -122,7 +122,7 @@ with gr.Blocks() as demo:
 
 
     examples = gr.Examples(
-        ["rickroll-2sec.mp4"],
+        ["rickroll-2sec.mp4", "images.webp"],
         inputs=in_video,
         outputs=[stream_image, out_video],
         fn=fn,
@@ -132,7 +132,7 @@ with gr.Blocks() as demo:
 
     submit_button.click(
         fn,
-        inputs=[in_video, fps_slider, bg_type, color_picker, bg_image],
+        inputs=[in_video, bg_image, fps_slider, bg_type, color_picker],
         outputs=[stream_image, out_video],
     )
 
