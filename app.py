@@ -26,7 +26,6 @@ transform_image = transforms.Compose(
     ]
 )
 
-
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
     # Load the video using moviepy
@@ -43,9 +42,11 @@ def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
     chunk_duration = 1  # seconds
     total_duration = video.duration
     start_time = 0
+        
+    progress = f'<div class="progress-container"><div class="progress-bar" style="--current: {start_time}; --total: {total_duration};"></div></div>'
 
     processed_frames = []
-    yield gr.update(visible=True), gr.update(visible=False), None
+    yield gr.update(visible=True), gr.update(visible=False), progress
 
     while start_time < total_duration:
         end_time = min(start_time + chunk_duration, total_duration)
@@ -59,7 +60,7 @@ def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
             else:
                 processed_image = process(pil_image, bg_image)
             processed_frames.append(np.array(processed_image))
-            yield processed_image, None, None
+            yield processed_image, None, progress
 
         # Save processed frames for the current chunk
         temp_dir = "temp"
@@ -71,7 +72,7 @@ def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
         processed_frames = []
         progress = f'<div class="progress-container"><div class="progress-bar" style="--current: {start_time}; --total: {total_duration};"></div></div>'
 
-        yield None, None, gr.update(value=progress)
+        yield None, None, progress
 
         start_time += chunk_duration
 
@@ -96,9 +97,9 @@ def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
     for filename in os.listdir(temp_dir):
         os.remove(os.path.join(temp_dir, filename))
 
-    yield gr.update(visible=False), gr.update(visible=True), gr.update(value=1)
+    yield gr.update(visible=False), gr.update(visible=True), progress
     # Return the path to the temporary file
-    yield processed_image, temp_filepath, None
+    yield processed_image, temp_filepath, progress
 
 
 def process(image, bg):
@@ -123,7 +124,12 @@ def process(image, bg):
     return image
 
 
-with gr.Blocks() as demo:
+css="""
+.progress-container {width: 100%;height: 30px;background-color: #f0f0f0;border-radius: 15px;overflow: hidden;margin-bottom: 20px}
+.progress-bar {height: 100%;background-color: #4f46e5;width: calc(var(--current) / var(--total) * 100%);transition: width 0.5s ease-in-out}
+"""
+
+with gr.Blocks(css=css, theme="ocean") as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video")
         stream_image = gr.Image(label="Streaming Output", visible=False)
