@@ -82,11 +82,11 @@ def process(image, bg):
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
 
-    if isinstance(bg, str):  # If bg is a file path (image)
-        background = Image.open(bg).convert("RGBA").resize(image_size)
-    else:  # If bg is a color hex code
+    if bg.startswith("#"):
         color_rgb = tuple(int(bg[i : i + 2], 16) for i in (1, 3, 5))
         background = Image.new("RGBA", image_size, color_rgb + (255,))
+    else:
+        background = Image.open(bg).convert("RGBA").resize(image_size)
 
     # Composite the image onto the background using the mask
     image = Image.composite(image, background, mask)
