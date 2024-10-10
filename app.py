@@ -122,13 +122,14 @@ with gr.Blocks() as demo:
 
 
     examples = gr.Examples(
-        [("rickroll-2sec.mp4", "Image", "images.webp"), ("rickroll-2sec.mp4", "Color", None)],
+        [["rickroll-2sec.mp4", "Image", "images.webp"], ["rickroll-2sec.mp4", "Color", None]],
         inputs=[in_video, bg_type, bg_image],
         outputs=[stream_image, out_video],
         fn=fn,
         cache_examples=True,
         cache_mode="eager",
     )
+
 
     submit_button.click(
         fn,
