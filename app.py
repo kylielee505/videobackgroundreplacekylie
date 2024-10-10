@@ -28,13 +28,13 @@ transform_image = transforms.Compose(
 
 
 @spaces.GPU
-def fn(vid, fps=0, color="#00FF00"):
+def fn(vid, fps=0, bg_type="Color", color="#00FF00", bg_image=None):
     # Load the video using moviepy
     video = mp.VideoFileClip(vid)
 
     # Load original fps if fps value is equal to 0
     if fps == 0:
-      fps = video.fps
+        fps = video.fps
 
     # Extract audio from the video
     audio = video.audio
@@ -47,7 +47,10 @@ def fn(vid, fps=0, color="#00FF00"):
     yield gr.update(visible=True), gr.update(visible=False)
     for frame in frames:
         pil_image = Image.fromarray(frame)
-        processed_image = process(pil_image, color)
+        if bg_type == "Color":
+            processed_image = process(pil_image, color)
+        else:
+            processed_image = process(pil_image, bg_image)
         processed_frames.append(np.array(processed_image))
         yield processed_image, None
 
@@ -63,13 +66,13 @@ def fn(vid, fps=0, color="#00FF00"):
     unique_filename = str(uuid.uuid4()) + ".mp4"
     temp_filepath = os.path.join(temp_dir, unique_filename)
     processed_video.write_videofile(temp_filepath, codec="libx264")
-    
+
     yield gr.update(visible=False), gr.update(visible=True)
     # Return the path to the temporary file
     yield processed_image, temp_filepath
 
 
-def process(image, color_hex):
+def process(image, bg):
     image_size = image.size
     input_images = transform_image(image).unsqueeze(0).to("cuda")
     # Prediction
@@ -79,11 +82,11 @@ def process(image, color_hex):
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
 
-    # Convert hex color to RGB tuple
-    color_rgb = tuple(int(color_hex[i : i + 2], 16) for i in (1, 3, 5))
-
-    # Create a background image with the chosen color
-    background = Image.new("RGBA", image_size, color_rgb + (255,))
+    if isinstance(bg, str):  # If bg is a file path (image)
+        background = Image.open(bg).convert("RGBA").resize(image_size)
+    else:  # If bg is a color hex code
+        color_rgb = tuple(int(bg[i : i + 2], 16) for i in (1, 3, 5))
+        background = Image.new("RGBA", image_size, color_rgb + (255,))
 
     # Composite the image onto the background using the mask
     image = Image.composite(image, background, mask)
@@ -95,17 +98,43 @@ with gr.Blocks() as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video")
         stream_image = gr.Image(label="Streaming Output", visible=False)
-        out_video = gr.Video(label="Final Output Video")  
+        out_video = gr.Video(label="Final Output Video")
     submit_button = gr.Button("Change Background")
     with gr.Row():
-        fps_slider = gr.Slider(minimum=0, maximum=60, step=1, value=0, label="Output FPS (0 will inherit the original fps value)")
-        color_picker = gr.ColorPicker(label="Background Color", value="#00FF00")
+        fps_slider = gr.Slider(
+            minimum=0,
+            maximum=60,
+            step=1,
+            value=0,
+            label="Output FPS (0 will inherit the original fps value)",
+        )
+        bg_type = gr.Radio(["Color", "Image"], label="Background Type", value="Color")
+        color_picker = gr.ColorPicker(label="Background Color", value="#00FF00", visible=True)
+        bg_image = gr.Image(label="Background Image", type="filepath", visible=False)
 
-    examples = gr.Examples(["rickroll-2sec.mp4"], inputs=in_video, outputs=[stream_image, out_video], fn=fn, cache_examples=True, cache_mode="eager")
+    def update_visibility(bg_type):
+        if bg_type == "Color":
+            return gr.update(visible=True), gr.update(visible=False)
+        else:
+            return gr.update(visible=False), gr.update(visible=True)
+
+    bg_type.change(update_visibility, inputs=bg_type, outputs=[color_picker, bg_image])
+
+
+    examples = gr.Examples(
+        ["rickroll-2sec.mp4"],
+        inputs=in_video,
+        outputs=[stream_image, out_video],
+        fn=fn,
+        cache_examples=True,
+        cache_mode="eager",
+    )
 
     submit_button.click(
-        fn, inputs=[in_video, fps_slider, color_picker], outputs=[stream_image, out_video]
+        fn,
+        inputs=[in_video, fps_slider, bg_type, color_picker, bg_image],
+        outputs=[stream_image, out_video],
     )
-    
+
 if __name__ == "__main__":
     demo.launch(show_error=True)
