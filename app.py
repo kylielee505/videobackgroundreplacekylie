@@ -45,7 +45,7 @@ def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
     start_time = 0
 
     processed_frames = []
-    yield gr.update(visible=True), gr.update(visible=False), gr.update(value=0)
+    yield gr.update(visible=True), gr.update(visible=False), None
 
     while start_time < total_duration:
         end_time = min(start_time + chunk_duration, total_duration)
@@ -69,9 +69,8 @@ def fn(vid, bg_type="Color", bg_image=None, color="#00FF00", fps=0):
 
         # Clear processed frames for the current chunk
         processed_frames = []
+        progress = f'<div class="progress-container"><div class="progress-bar" style="--current: {start_time}; --total: {total_duration};"></div></div>'
 
-        # Update progress bar
-        progress = start_time / total_duration
         yield None, None, gr.update(value=progress)
 
         start_time += chunk_duration
@@ -150,7 +149,7 @@ with gr.Blocks() as demo:
 
     bg_type.change(update_visibility, inputs=bg_type, outputs=[color_picker, bg_image])
 
-    progress_bar = gr.ProgressBar(label="Processing Video")
+    progress_bar = gr.Markdown(elem_id="progress")
 
     examples = gr.Examples(
         [["rickroll-2sec.mp4", "Image", "images.webp"], ["rickroll-2sec.mp4", "Color", None]],
