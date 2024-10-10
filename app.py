@@ -129,7 +129,6 @@ def process(image, bg):
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     with gr.Row():
         in_video = gr.Video(label="Input Video", interactive=True)
-        color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
         stream_image = gr.Image(label="Streaming Output", visible=False)
         out_video = gr.Video(label="Final Output Video")
     submit_button = gr.Button("Change Background", interactive=True)
