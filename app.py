@@ -122,8 +122,8 @@ with gr.Blocks() as demo:
 
 
     examples = gr.Examples(
-        [("rickroll-2sec.mp4", "Image", "images.webp"), ("rickroll-2sec.mp4", "Color")],
-        inputs=in_video,
+        [("rickroll-2sec.mp4", "Image", "images.webp"), ("rickroll-2sec.mp4", "Color", None)],
+        inputs=[in_video, bg_type, bg_image],
         outputs=[stream_image, out_video],
         fn=fn,
         cache_examples=True,
