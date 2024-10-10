@@ -128,7 +128,7 @@ def process(image, bg):
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     with gr.Row():
-        in_video = gr.Video(label="Input Video", interactive=True    if isinstance(bg, str) and bg.startswith("#"):
+        in_video = gr.Video(label="Input Video", interactive=True)
         color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
         background = Image.new("RGBA", image_size, color_rgb + (255,))
     elif isinstance(bg, Image.Image):
