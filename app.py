@@ -5,7 +5,6 @@ from transformers import AutoModelForImageSegmentation
 import torch
 from torchvision import transforms
 import moviepy.editor as mp
-from pydub import AudioSegment
 from PIL import Image
 import numpy as np
 import os
@@ -28,7 +27,19 @@ transform_image = transforms.Compose(
 )
 
 BATCH_SIZE = 3
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=4)  # Adjust as needed
+
+def get_background_image(bg_type, bg_image, background_frames, current_frame_index, video_handling, slow_down_factor):
+    if bg_type == "Video":
+        if video_handling == "slow_down":
+            frame_index = int(current_frame_index / slow_down_factor)
+        else:
+            frame_index = current_frame_index
+        return Image.fromarray(background_frames[frame_index % len(background_frames)])
+    elif bg_type == "Image":
+        return bg_image  # Directly returns the image path
+    else:  # bg_type == "Color"
+        return bg_image  # bg_image here is the color string
 
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
@@ -38,66 +49,62 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
             audio = video.audio
         except AttributeError:
             audio = None
+
         if fps == 0:
             fps = video.fps
-
         frames = video.iter_frames(fps=fps)
         processed_frames = []
-        yield gr.update(visible=True), gr.update(visible=False)
+        yield gr.update(visible=True), gr.update(visible=False)  # Update Gradio display
 
         if bg_type == "Video":
             background_video = mp.VideoFileClip(bg_video)
-
             if background_video.duration < video.duration and video_handling == "slow_down":
                 slow_down_factor = video.duration / background_video.duration
             else:
                 slow_down_factor = 1
             background_frames = list(background_video.iter_frames(fps=fps))
-
         else:
             background_frames = None
-            slow_down_factor = None
-
+            slow_down_factor = None  # Not needed for image or color backgrounds
 
         bg_frame_index = 0
         frame_batch = []
 
-
         for i, frame in enumerate(frames):
             frame_batch.append(frame)
-
             if len(frame_batch) == BATCH_SIZE or i == int(video.fps * video.duration) - 1:
-
                 pil_images = [Image.fromarray(f) for f in frame_batch]
 
                 if bg_type == "Video":
                     processed_images = list(executor.map(process, pil_images, [get_background_image(bg_type, bg_image, background_frames, bg_frame_index + j, video_handling, slow_down_factor) for j in range(len(pil_images))]))
                     bg_frame_index += len(frame_batch)
                 elif bg_type == "Color":
-                    processed_images = list(executor.map(process, pil_images, [color] * len(pil_images)))
+                    processed_images = list(executor.map(process, pil_images, [color] * len(pil_images)))  # Use color directly
                 elif bg_type == "Image":
-                    processed_images = list(executor.map(process, pil_images, [bg_image] * len(pil_images)))
+                    processed_images = list(executor.map(process, pil_images, [bg_image] * len(pil_images))) # Use image path directly
                 else:
-                    processed_images = pil_images
+                    processed_images = pil_images  # No processing needed
 
                 for processed_image in processed_images:
                     processed_frames.append(np.array(processed_image))
-                    yield processed_image, None
+                    yield processed_image, None  # Update Gradio with processed images
                 frame_batch = []
+
 
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
         if audio:
             processed_video = processed_video.set_audio(audio)
 
+        # Save processed video to a temporary file
         temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
         unique_filename = str(uuid.uuid4()) + ".mp4"
         temp_filepath = os.path.join(temp_dir, unique_filename)
-
         processed_video.write_videofile(temp_filepath, codec="libx264", logger=None)
 
-        yield gr.update(visible=False), gr.update(visible=True)
-        yield processed_image, temp_filepath
+
+        yield gr.update(visible=False), gr.update(visible=True) # Update Gradio display
+        yield processed_image, temp_filepath # Return final output
 
     except Exception as e:
         print(f"Error: {e}")
@@ -105,28 +112,28 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         yield None, f"Error processing video: {e}"
 
 
+
+
 def process(image, bg):
     image_size = image.size
     input_images = transform_image(image).unsqueeze(0).to("cuda")
-    # Prediction
     with torch.no_grad():
         preds = birefnet(input_images)[-1].sigmoid().cpu()
     pred = preds[0].squeeze()
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
 
-    if isinstance(bg, str) and bg.startswith("#"):
+    if isinstance(bg, str) and bg.startswith("#"):  # If bg is a color
         color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
-        background = Image.new("RGBA", image_size, color_rgb + (255,))
+        background = Image.new("RGBA", image_size, color_rgb + (255,)) # Create image with color
     elif isinstance(bg, Image.Image):
-        background = bg.convert("RGBA").resize(image_size)
-    else:
-        background = Image.open(bg).convert("RGBA").resize(image_size)
+        background = bg.convert("RGBA").resize(image_size) #Resize if bg is an image
+    else: #If bg is an image path
+        background = Image.open(bg).convert("RGBA").resize(image_size) # Open and resize image
 
-    # Composite the image onto the background using the mask
     image = Image.composite(image, background, mask)
-
     return image
+
 
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
