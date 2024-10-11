@@ -164,9 +164,9 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
 
     examples = gr.Examples(
         [
+            ["rickroll-2sec.mp4", "Video", None, "background.mp4"],
             ["rickroll-2sec.mp4", "Image", "images.webp", None],
             ["rickroll-2sec.mp4", "Color", None, None],
-            ["rickroll-2sec.mp4", "Video", None, "background.mp4"] 
         ],
         inputs=[in_video, bg_type, bg_image, bg_video],
         outputs=[stream_image, out_video],
