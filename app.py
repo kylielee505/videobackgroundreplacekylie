@@ -26,24 +26,16 @@ transform_image = transforms.Compose(
     ]
 )
 
+BATCH_SIZE = 3
 
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
     try:
-        # Load the video using moviepy
         video = mp.VideoFileClip(vid)
-
-        # Load original fps if fps value is equal to 0
         if fps == 0:
             fps = video.fps
-
-        # Extract audio from the video
         audio = video.audio
-
-        # Extract frames at the specified FPS
         frames = video.iter_frames(fps=fps)
-
-        # Process each frame for background removal
         processed_frames = []
         yield gr.update(visible=True), gr.update(visible=False)
 
@@ -52,59 +44,66 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
             if background_video.duration < video.duration:
                 if video_handling == "slow_down":
                     background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
-                else:  # video_handling == "loop"
+                else:
                     background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
-            background_frames = list(background_video.iter_frames(fps=fps))  # Convert to list
+            background_frames = list(background_video.iter_frames(fps=fps))
         else:
             background_frames = None
 
-        bg_frame_index = 0  # Initialize background frame index
+        bg_frame_index = 0
+        frame_batch = []
 
         for i, frame in enumerate(frames):
-            pil_image = Image.fromarray(frame)
-            if bg_type == "Color":
-                processed_image = process(pil_image, color)
-            elif bg_type == "Image":
-                processed_image = process(pil_image, bg_image)
-            elif bg_type == "Video":
-                if video_handling == "slow_down":
-                    background_frame = background_frames[bg_frame_index % len(background_frames)]
-                    bg_frame_index += 1
-                    background_image = Image.fromarray(background_frame)
-                    processed_image = process(pil_image, background_image)
-                else:  # video_handling == "loop"
-                    background_frame = background_frames[bg_frame_index % len(background_frames)]
-                    bg_frame_index += 1
-                    background_image = Image.fromarray(background_frame)
-                    processed_image = process(pil_image, background_image)
-            else:
-                processed_image = pil_image  # Default to original image if no background is selected
+            frame_batch.append(frame)
+            if len(frame_batch) == BATCH_SIZE or i == video.fps * video.duration -1:  # Process batch or last frames
+                pil_images = [Image.fromarray(f) for f in frame_batch]
 
-            processed_frames.append(np.array(processed_image))
-            yield processed_image, None
 
-        # Create a new video from the processed frames
+                if bg_type == "Color":
+                    processed_images = [process(img, color) for img in pil_images]
+                elif bg_type == "Image":
+                    processed_images = [process(img, bg_image) for img in pil_images]
+                elif bg_type == "Video":
+                    processed_images = []
+                    for _ in range(len(frame_batch)):
+                        if video_handling == "slow_down":
+                            background_frame = background_frames[bg_frame_index % len(background_frames)]
+                            bg_frame_index += 1
+                            background_image = Image.fromarray(background_frame)
+                        else:  # video_handling == "loop"
+                            background_frame = background_frames[bg_frame_index % len(background_frames)]
+                            bg_frame_index += 1
+                            background_image = Image.fromarray(background_frame)
+
+                        processed_images.append(process(pil_images[_],background_image))
+
+
+                else:
+                    processed_images = pil_images
+
+                for processed_image in processed_images:
+                    processed_frames.append(np.array(processed_image))
+                    yield processed_image, None
+                frame_batch = []  # Clear the batch
+
+
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
-
-        # Add the original audio back to the processed video
         processed_video = processed_video.set_audio(audio)
 
-        # Save the processed video to a temporary file
         temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
         unique_filename = str(uuid.uuid4()) + ".mp4"
         temp_filepath = os.path.join(temp_dir, unique_filename)
-        processed_video.write_videofile(temp_filepath, codec="libx264")
+
+        processed_video.write_videofile(temp_filepath, codec="libx264", logger=None)
 
         yield gr.update(visible=False), gr.update(visible=True)
-        # Return the path to the temporary file
         yield processed_image, temp_filepath
 
     except Exception as e:
         print(f"Error: {e}")
         yield gr.update(visible=False), gr.update(visible=True)
         yield None, f"Error processing video: {e}"
-
 
 
 def process(image, bg):
