@@ -72,14 +72,11 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
                     bg_frame_index += 1
                     background_image = Image.fromarray(background_frame)
                     processed_image = process(pil_image, background_image)
-                else: # video_handling == "loop"
-                    try:
-                        background_frame = next(background_frames)
-                        background_image = Image.fromarray(background_frame)
-                        processed_image = process(pil_image, background_image)
-                    except StopIteration:
-                        # Handle case where background video is shorter than input video
-                        processed_image = process(pil_image, "#000000")  # Default to black background
+                else:  # video_handling == "loop"
+                    background_frame = background_frames[bg_frame_index % len(background_frames)]
+                    bg_frame_index += 1
+                    background_image = Image.fromarray(background_frame)
+                    processed_image = process(pil_image, background_image)
             else:
                 processed_image = pil_image  # Default to original image if no background is selected
 
