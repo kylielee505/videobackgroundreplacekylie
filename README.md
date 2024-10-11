@@ -1,6 +1,6 @@
 ---
 title: Video Background Removal
-emoji: 📽️🎥
+emoji: 📽️
 colorFrom: purple
 colorTo: pink
 sdk: gradio
