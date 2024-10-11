@@ -11,133 +11,96 @@ import numpy as np
 import os
 import tempfile
 import uuid
-from concurrent.futures import ThreadPoolExecutor
-import torch.nn as nn
-import torch.cuda.amp  # for mixed precision training
 
-# Enable tensor cores for faster computation
-torch.set_float32_matmul_precision("high")
-torch.backends.cudnn.benchmark = True  # Enable cudnn autotuner
+torch.set_float32_matmul_precision("highest")
 
-# Initialize model with optimization flags
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
+).to("cuda")
+transform_image = transforms.Compose(
+    [
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ]
 )
-birefnet.to("cuda").eval()  # Ensure model is in eval mode
-birefnet = torch.jit.script(birefnet)  # JIT compilation for faster inference
-
-# Pre-compile transforms for better performance
-transform_image = transforms.Compose([
-    transforms.Resize((1024, 1024), antialias=True),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-])
-
-# Increased batch size for better GPU utilization
-BATCH_SIZE = 8  # Increased from 3
-NUM_WORKERS = 4  # For parallel processing
-
-# Create a thread pool for parallel processing
-executor = ThreadPoolExecutor(max_workers=NUM_WORKERS)
-
-def process_batch(batch_data):
-    """Process a batch of frames in parallel"""
-    images, backgrounds, image_sizes = zip(*batch_data)
-    
-    # Stack images for batch processing
-    input_tensor = torch.stack(images).to("cuda")
-    
-    # Use automatic mixed precision for faster computation
-    with torch.cuda.amp.autocast():
-        with torch.no_grad():
-            preds = birefnet(input_tensor)[-1].sigmoid().cpu()
-    
-    processed_frames = []
-    for pred, bg, size in zip(preds, backgrounds, image_sizes):
-        mask = transforms.ToPILImage()(pred.squeeze()).resize(size)
-        
-        if isinstance(bg, str) and bg.startswith("#"):
-            color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
-            background = Image.new("RGBA", size, color_rgb + (255,))
-        elif isinstance(bg, Image.Image):
-            background = bg.convert("RGBA").resize(size)
-        else:
-            background = Image.open(bg).convert("RGBA").resize(size)
-        
-        # Use PIL's faster composite operation
-        image = Image.composite(images[0].resize(size), background, mask)
-        processed_frames.append(np.array(image))
-    
-    return processed_frames
 
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
     try:
-        # Load video more efficiently
-        video = mp.VideoFileClip(vid, audio_buffersize=2000)
+        video = mp.VideoFileClip(vid)
         if fps == 0:
             fps = video.fps
         audio = video.audio
-        
-        # Pre-calculate video parameters
-        total_frames = int(video.fps * video.duration)
-        frames = list(video.iter_frames(fps=fps))  # Load all frames at once
-        
-        # Pre-process background if using video
-        if bg_type == "Video":
-            bg_video_clip = mp.VideoFileClip(bg_video)
-            if bg_video_clip.duration < video.duration:
-                if video_handling == "slow_down":
-                    bg_video_clip = bg_video_clip.fx(mp.vfx.speedx, 
-                                                   factor=video.duration / bg_video_clip.duration)
-                else:
-                    multiplier = int(video.duration / bg_video_clip.duration + 1)
-                    bg_video_clip = mp.concatenate_videoclips([bg_video_clip] * multiplier)
-            background_frames = list(bg_video_clip.iter_frames(fps=fps))
-        
-        # Process frames in batches
+        frames = video.iter_frames(fps=fps)
         processed_frames = []
-        for i in range(0, len(frames), BATCH_SIZE):
-            batch_frames = frames[i:i + BATCH_SIZE]
-            batch_data = []
-            
-            for j, frame in enumerate(batch_frames):
-                pil_image = Image.fromarray(frame)
-                image_size = pil_image.size
-                transformed_image = transform_image(pil_image)
-                
-                if bg_type == "Color":
-                    bg = color
-                elif bg_type == "Image":
-                    bg = bg_image
-                else:  # Video
-                    frame_idx = (i + j) % len(background_frames)
-                    bg = Image.fromarray(background_frames[frame_idx])
-                
-                batch_data.append((transformed_image, bg, image_size))
-            
-            # Process batch
-            batch_results = process_batch(batch_data)
-            processed_frames.extend(batch_results)
-            
-            # Yield progress updates
-            if len(batch_results) > 0:
-                yield batch_results[-1], None
-        
-        # Create output video
+        yield gr.update(visible=True), gr.update(visible=False)
+
+        if bg_type == "Video":
+            background_video = mp.VideoFileClip(bg_video)
+            if background_video.duration < video.duration:
+                if video_handling == "slow_down":
+                    background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
+                else:
+                    background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
+            background_frames = list(background_video.iter_frames(fps=fps))
+        elif bg_type in ["Color", "Image"]:
+             # Prepare background once if it's a static image or color
+            if bg_type == "Color":
+                color_rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+                background_pil = Image.new("RGBA", (1024, 1024), color_rgb + (255,))
+            else: # bg_type == "Image":
+                background_pil = Image.open(bg_image).convert("RGBA").resize((1024, 1024))
+            background_tensor = transforms.ToTensor(background_pil).to("cuda")
+        else:
+            background_tensor = None
+
+
+        bg_frame_index = 0
+        frame_batch = []
+        for i, frame in enumerate(frames):
+            frame = Image.fromarray(frame)
+            frame = transforms.ToTensor(frame).to('cuda')
+            frame_batch.append(frame)
+
+            if len(frame_batch) >= 3 or i == int(video.fps * video.duration) - 1 :
+                input_images = torch.stack(frame_batch).to("cuda")
+                with torch.no_grad():
+                    preds = birefnet(input_images)[-1].sigmoid()
+                for j, pred in enumerate(preds):
+                    if bg_type == "Video":
+                        if video_handling == "slow_down":
+                            background_frame = background_frames[bg_frame_index % len(background_frames)]
+                            bg_frame_index += 1
+                            background_image = Image.fromarray(background_frame).resize((1024, 1024))
+                            background_tensor = transforms.ToTensor(background_image).to("cuda")
+                        else:  # video_handling == "loop"
+                            background_frame = background_frames[bg_frame_index % len(background_frames)]
+                            bg_frame_index += 1
+                            background_image = Image.fromarray(background_frame).resize((1024, 1024))
+                            background_tensor = transforms.ToTensor(background_image).to("cuda")
+                    mask = transforms.ToPILImage()(pred.cpu().squeeze())
+                    processed_image = Image.composite(transforms.ToPILImage()(frame_batch[j].cpu()), transforms.ToPILImage()(background_tensor.cpu()), mask).resize(video.size)
+
+                    processed_frames.append(np.array(processed_image))
+                    yield processed_image, None
+
+                frame_batch = []
+
+
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
-        if audio is not None:
-            processed_video = processed_video.set_audio(audio)
-        
-        # Use temporary file
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
-            output_path = tmp_file.name
-            processed_video.write_videofile(output_path, codec="libx264", 
-                                         preset='ultrafast', threads=NUM_WORKERS)
-        
+        processed_video = processed_video.set_audio(audio)
+
+        temp_dir = "temp"
+        os.makedirs(temp_dir, exist_ok=True)
+        unique_filename = str(uuid.uuid4()) + ".mp4"
+        temp_filepath = os.path.join(temp_dir, unique_filename)
+
+        processed_video.write_videofile(temp_filepath, codec="libx264", logger=None)
+
         yield gr.update(visible=False), gr.update(visible=True)
-        yield processed_frames[-1], output_path
-        
+        yield processed_image, temp_filepath
+
     except Exception as e:
         print(f"Error: {e}")
         yield gr.update(visible=False), gr.update(visible=True)
