@@ -17,6 +17,7 @@ torch.set_float32_matmul_precision("highest")
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
 ).to("cuda")
+
 transform_image = transforms.Compose(
     [
         transforms.Resize((1024, 1024)),
@@ -24,6 +25,8 @@ transform_image = transforms.Compose(
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ]
 )
+
+BATCH_SIZE = 3
 
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
@@ -44,48 +47,44 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
                 else:
                     background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
             background_frames = list(background_video.iter_frames(fps=fps))
-        elif bg_type in ["Color", "Image"]:
-             # Prepare background once if it's a static image or color
-            if bg_type == "Color":
-                color_rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
-                background_pil = Image.new("RGBA", (1024, 1024), color_rgb + (255,))
-            else: # bg_type == "Image":
-                background_pil = Image.open(bg_image).convert("RGBA").resize((1024, 1024))
-            background_tensor = transforms.ToTensor(background_pil).to("cuda")
         else:
-            background_tensor = None
-
+            background_frames = None
 
         bg_frame_index = 0
         frame_batch = []
-        for i, frame in enumerate(frames):
-            frame = Image.fromarray(frame)
-            frame = transforms.ToTensor(frame).to('cuda')
-            frame_batch.append(frame)
 
-            if len(frame_batch) >= 3 or i == int(video.fps * video.duration) - 1 :
-                input_images = torch.stack(frame_batch).to("cuda")
-                with torch.no_grad():
-                    preds = birefnet(input_images)[-1].sigmoid()
-                for j, pred in enumerate(preds):
-                    if bg_type == "Video":
+        for i, frame in enumerate(frames):
+            frame_batch.append(frame)
+            if len(frame_batch) == BATCH_SIZE or i == video.fps * video.duration -1:  # Process batch or last frames
+                pil_images = [Image.fromarray(f) for f in frame_batch]
+
+
+                if bg_type == "Color":
+                    processed_images = [process(img, color) for img in pil_images]
+                elif bg_type == "Image":
+                    processed_images = [process(img, bg_image) for img in pil_images]
+                elif bg_type == "Video":
+                    processed_images = []
+                    for _ in range(len(frame_batch)):
                         if video_handling == "slow_down":
                             background_frame = background_frames[bg_frame_index % len(background_frames)]
                             bg_frame_index += 1
-                            background_image = Image.fromarray(background_frame).resize((1024, 1024))
-                            background_tensor = transforms.ToTensor(background_image).to("cuda")
+                            background_image = Image.fromarray(background_frame)
                         else:  # video_handling == "loop"
                             background_frame = background_frames[bg_frame_index % len(background_frames)]
                             bg_frame_index += 1
-                            background_image = Image.fromarray(background_frame).resize((1024, 1024))
-                            background_tensor = transforms.ToTensor(background_image).to("cuda")
-                    mask = transforms.ToPILImage()(pred.cpu().squeeze())
-                    processed_image = Image.composite(transforms.ToPILImage()(frame_batch[j].cpu()), transforms.ToPILImage()(background_tensor.cpu()), mask).resize(video.size)
+                            background_image = Image.fromarray(background_frame)
 
+                        processed_images.append(process(pil_images[_],background_image))
+
+
+                else:
+                    processed_images = pil_images
+
+                for processed_image in processed_images:
                     processed_frames.append(np.array(processed_image))
                     yield processed_image, None
-
-                frame_batch = []
+                frame_batch = []  # Clear the batch
 
 
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
@@ -105,6 +104,30 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         print(f"Error: {e}")
         yield gr.update(visible=False), gr.update(visible=True)
         yield None, f"Error processing video: {e}"
+
+
+def process(image, bg):
+    image_size = image.size
+    input_images = transform_image(image).unsqueeze(0).to("cuda")
+    # Prediction
+    with torch.no_grad():
+        preds = birefnet(input_images)[-1].sigmoid().cpu()
+    pred = preds[0].squeeze()
+    pred_pil = transforms.ToPILImage()(pred)
+    mask = pred_pil.resize(image_size)
+
+    if isinstance(bg, str) and bg.startswith("#"):
+        color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
+        background = Image.new("RGBA", image_size, color_rgb + (255,))
+    elif isinstance(bg, Image.Image):
+        background = bg.convert("RGBA").resize(image_size)
+    else:
+        background = Image.open(bg).convert("RGBA").resize(image_size)
+
+    # Composite the image onto the background using the mask
+    image = Image.composite(image, background, mask)
+
+    return image
 
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
