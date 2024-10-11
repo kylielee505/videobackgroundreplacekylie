@@ -12,7 +12,7 @@ import os
 import tempfile
 import uuid
 
-torch.set_float32_matmul_precision("highest")
+torch.set_float32_matmul_precision("medium")
 
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
