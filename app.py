@@ -51,10 +51,23 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
             background_video = mp.VideoFileClip(bg_video)
             if background_video.duration < video.duration:
                 if video_handling == "slow_down":
-                    background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
+                    speed_factor = video.duration / background_video.duration
+                    background_video = background_video.fx(mp.vfx.speedx, factor=speed_factor)
+                    background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
                 else:  # video_handling == "loop"
                     background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
-            background_frames = background_video.iter_frames(fps=fps)
+                    background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
+            elif background_video.duration > video.duration:
+                if video_handling == "slow_down":
+                    # Handle longer background video (e.g., trim or adjust logic)
+                    background_video = background_video.subclip(0, video.duration)  
+                    background_frames = background_video.iter_frames(fps=fps)
+                else:  # video_handling == "loop"
+                    background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
+                    background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
+
+            else:
+                background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
         else:
             background_frames = None
 
