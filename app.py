@@ -51,25 +51,14 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
             background_video = mp.VideoFileClip(bg_video)
             if background_video.duration < video.duration:
                 if video_handling == "slow_down":
-                    speed_factor = video.duration / background_video.duration
-                    background_video = background_video.fx(mp.vfx.speedx, factor=speed_factor)
-                    background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
+                    background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
                 else:  # video_handling == "loop"
                     background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
-                    background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
-            elif background_video.duration > video.duration:
-                if video_handling == "slow_down":
-                    # Handle longer background video (e.g., trim or adjust logic)
-                    background_video = background_video.subclip(0, video.duration)  
-                    background_frames = background_video.iter_frames(fps=fps)
-                else:  # video_handling == "loop"
-                    background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
-                    background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
-
-            else:
-                background_frames = background_video.iter_frames(fps=fps)  # Extract frames at desired FPS
+            background_frames = list(background_video.iter_frames(fps=fps))  # Convert to list
         else:
             background_frames = None
+
+        bg_frame_index = 0  # Initialize background frame index
 
         for i, frame in enumerate(frames):
             pil_image = Image.fromarray(frame)
@@ -78,13 +67,19 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
             elif bg_type == "Image":
                 processed_image = process(pil_image, bg_image)
             elif bg_type == "Video":
-                try:
-                    background_frame = next(background_frames)
+                if video_handling == "slow_down":
+                    background_frame = background_frames[bg_frame_index % len(background_frames)]
+                    bg_frame_index += 1
                     background_image = Image.fromarray(background_frame)
                     processed_image = process(pil_image, background_image)
-                except StopIteration:
-                    # Handle case where background video is shorter than input video
-                    processed_image = process(pil_image, "#000000")  # Default to black background
+                else: # video_handling == "loop"
+                    try:
+                        background_frame = next(background_frames)
+                        background_image = Image.fromarray(background_frame)
+                        processed_image = process(pil_image, background_image)
+                    except StopIteration:
+                        # Handle case where background video is shorter than input video
+                        processed_image = process(pil_image, "#000000")  # Default to black background
             else:
                 processed_image = pil_image  # Default to original image if no background is selected
 
