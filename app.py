@@ -11,6 +11,7 @@ import numpy as np
 import os
 import tempfile
 import uuid
+import threading
 
 torch.set_float32_matmul_precision("highest")
 
@@ -28,6 +29,31 @@ transform_image = transforms.Compose(
 
 BATCH_SIZE = 3
 
+def process_batch(frame_batch, bg_type, bg_image, bg_video, color, fps, video_handling, bg_frame_index, background_frames):
+    pil_images = [Image.fromarray(f) for f in frame_batch]
+    processed_images = []
+
+    if bg_type == "Color":
+        processed_images = [process(img, color) for img in pil_images]
+    elif bg_type == "Image":
+        processed_images = [process(img, bg_image) for img in pil_images]
+    elif bg_type == "Video":
+        for _ in range(len(frame_batch)):
+            if video_handling == "slow_down":
+                background_frame = background_frames[int(bg_frame_index)]
+                bg_frame_index += len(background_frames) / (len(frame_batch) * (len(background_frames) / (fps*mp.VideoFileClip(bg_video).duration)))
+                background_image = Image.fromarray(background_frame)
+            else:  # video_handling == "loop"
+                background_frame = background_frames[bg_frame_index % len(background_frames)]
+                bg_frame_index += 1
+                background_image = Image.fromarray(background_frame)
+
+            processed_images.append(process(pil_images[_], background_image))
+    else:
+        processed_images = pil_images
+
+    return processed_images, bg_frame_index
+
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
     try:
@@ -35,7 +61,7 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         if fps == 0:
             fps = video.fps
         audio = video.audio
-        frames = video.iter_frames(fps=fps)
+        frames = list(video.iter_frames(fps=fps))
         processed_frames = []
         yield gr.update(visible=True), gr.update(visible=False)
 
@@ -52,40 +78,22 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
 
         bg_frame_index = 0
         frame_batch = []
+        threads = []
+
 
         for i, frame in enumerate(frames):
             frame_batch.append(frame)
-            if len(frame_batch) == BATCH_SIZE or i == video.fps * video.duration -1:  # Process batch or last frames
-                pil_images = [Image.fromarray(f) for f in frame_batch]
+            if len(frame_batch) == BATCH_SIZE or i == len(frames) - 1:  # Process batch or last frames
+                thread = threading.Thread(target=lambda : processed_frames.extend(process_batch(frame_batch, bg_type, bg_image, bg_video, color, fps, video_handling, bg_frame_index, background_frames)[0]))
+                threads.append(thread)
+                thread.start()
+                frame_batch = []
 
+        for thread in threads:
+            thread.join()
 
-                if bg_type == "Color":
-                    processed_images = [process(img, color) for img in pil_images]
-                elif bg_type == "Image":
-                    processed_images = [process(img, bg_image) for img in pil_images]
-                elif bg_type == "Video":
-                    processed_images = []
-                    for _ in range(len(frame_batch)):
-                        if video_handling == "slow_down":
-                            background_frame = background_frames[bg_frame_index % len(background_frames)]
-                            bg_frame_index += 1
-                            background_image = Image.fromarray(background_frame)
-                        else:  # video_handling == "loop"
-                            background_frame = background_frames[bg_frame_index % len(background_frames)]
-                            bg_frame_index += 1
-                            background_image = Image.fromarray(background_frame)
-
-                        processed_images.append(process(pil_images[_],background_image))
-
-
-                else:
-                    processed_images = pil_images
-
-                for processed_image in processed_images:
-                    processed_frames.append(np.array(processed_image))
-                    yield processed_image, None
-                frame_batch = []  # Clear the batch
-
+        for processed_image in processed_frames:
+            yield processed_image, None
 
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
         processed_video = processed_video.set_audio(audio)
