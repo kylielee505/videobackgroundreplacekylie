@@ -14,10 +14,12 @@ import uuid
 
 torch.set_float32_matmul_precision("medium")
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
 )
-birefnet.to("cuda")
+birefnet.to(device)
 transform_image = transforms.Compose(
     [
         transforms.Resize((1024, 1024)),
@@ -132,6 +134,7 @@ def process(image, bg):
 
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
+    gr.Markdown("# Video Background Remover & Changer\n### You can replace image background with any color, image or video.\nNOTE: As this Space is running on ZERO GPU it has limit. It can handle approx 200frmaes at once. So, if you have big video than use small chunks or Duplicate this space.")
     with gr.Row():
         in_video = gr.Video(label="Input Video", interactive=True)
         stream_image = gr.Image(label="Streaming Output", visible=False)
