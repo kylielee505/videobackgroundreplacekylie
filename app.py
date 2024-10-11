@@ -5,19 +5,19 @@ from transformers import AutoModelForImageSegmentation
 import torch
 from torchvision import transforms
 import moviepy.editor as mp
+from pydub import AudioSegment
 from PIL import Image
 import numpy as np
 import os
 import tempfile
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 
 torch.set_float32_matmul_precision("highest")
 
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
-).to("cuda")
-
+)
+birefnet.to("cuda")
 transform_image = transforms.Compose(
     [
         transforms.Resize((1024, 1024)),
@@ -26,85 +26,79 @@ transform_image = transforms.Compose(
     ]
 )
 
-BATCH_SIZE = 3
-executor = ThreadPoolExecutor(max_workers=4)  # Adjust as needed
-
-def get_background_image(bg_type, bg_image, background_frames, current_frame_index, video_handling, slow_down_factor):
-    if bg_type == "Video":
-        if video_handling == "slow_down":
-            frame_index = int(current_frame_index / slow_down_factor)
-        else:
-            frame_index = current_frame_index
-        return Image.fromarray(background_frames[frame_index % len(background_frames)])
-    elif bg_type == "Image":
-        return bg_image  # Directly returns the image path
-    else:  # bg_type == "Color"
-        return bg_image  # bg_image here is the color string
 
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
     try:
+        # Load the video using moviepy
         video = mp.VideoFileClip(vid)
-        try:
-            audio = video.audio
-        except AttributeError:
-            audio = None
 
+        # Load original fps if fps value is equal to 0
         if fps == 0:
             fps = video.fps
+
+        # Extract audio from the video
+        audio = video.audio
+
+        # Extract frames at the specified FPS
         frames = video.iter_frames(fps=fps)
+
+        # Process each frame for background removal
         processed_frames = []
-        yield gr.update(visible=True), gr.update(visible=False)  # Update Gradio display
+        yield gr.update(visible=True), gr.update(visible=False)
 
         if bg_type == "Video":
             background_video = mp.VideoFileClip(bg_video)
-            if background_video.duration < video.duration and video_handling == "slow_down":
-                slow_down_factor = video.duration / background_video.duration
-            else:
-                slow_down_factor = 1
-            background_frames = list(background_video.iter_frames(fps=fps))
+            if background_video.duration < video.duration:
+                if video_handling == "slow_down":
+                    background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
+                else:  # video_handling == "loop"
+                    background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
+            background_frames = list(background_video.iter_frames(fps=fps))  # Convert to list
         else:
             background_frames = None
-            slow_down_factor = None  # Not needed for image or color backgrounds
 
-        bg_frame_index = 0
-        frame_batch = []
+        bg_frame_index = 0  # Initialize background frame index
 
         for i, frame in enumerate(frames):
-            frame_batch.append(frame)
-            if len(frame_batch) == BATCH_SIZE or i == int(video.fps * video.duration) - 1:
-                pil_images = [Image.fromarray(f) for f in frame_batch]
+            pil_image = Image.fromarray(frame)
+            if bg_type == "Color":
+                processed_image = process(pil_image, color)
+            elif bg_type == "Image":
+                processed_image = process(pil_image, bg_image)
+            elif bg_type == "Video":
+                if video_handling == "slow_down":
+                    background_frame = background_frames[bg_frame_index % len(background_frames)]
+                    bg_frame_index += 1
+                    background_image = Image.fromarray(background_frame)
+                    processed_image = process(pil_image, background_image)
+                else:  # video_handling == "loop"
+                    background_frame = background_frames[bg_frame_index % len(background_frames)]
+                    bg_frame_index += 1
+                    background_image = Image.fromarray(background_frame)
+                    processed_image = process(pil_image, background_image)
+            else:
+                processed_image = pil_image  # Default to original image if no background is selected
 
-                if bg_type == "Video":
-                    processed_images = list(executor.map(process, pil_images, [get_background_image(bg_type, bg_image, background_frames, bg_frame_index + j, video_handling, slow_down_factor) for j in range(len(pil_images))]))
-                    bg_frame_index += len(frame_batch)
-                elif bg_type == "Color":
-                    processed_images = list(executor.map(process, pil_images, [color] * len(pil_images)))  # Use color directly
-                elif bg_type == "Image":
-                    processed_images = list(executor.map(process, pil_images, [bg_image] * len(pil_images))) # Use image path directly
-                else:
-                    processed_images = pil_images  # No processing needed
+            processed_frames.append(np.array(processed_image))
+            yield processed_image, None
 
-                for processed_image in processed_images:
-                    processed_frames.append(np.array(processed_image))
-                    yield processed_image, None  # Update Gradio with processed images
-                frame_batch = []
-
-
+        # Create a new video from the processed frames
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
-        if audio:
-            processed_video = processed_video.set_audio(audio)
 
-        # Save processed video to a temporary file
+        # Add the original audio back to the processed video
+        processed_video = processed_video.set_audio(audio)
+
+        # Save the processed video to a temporary file
         temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
         unique_filename = str(uuid.uuid4()) + ".mp4"
         temp_filepath = os.path.join(temp_dir, unique_filename)
-        processed_video.write_videofile(temp_filepath, codec="libx264", logger=None)
+        processed_video.write_videofile(temp_filepath, codec="libx264")
 
-
-        yield gr.update(visible=False), gr.update(visible=True) # Update Gradio display
-        yield processed_image, temp_filepath # Return final output
+        yield gr.update(visible=False), gr.update(visible=True)
+        # Return the path to the temporary file
+        yield processed_image, temp_filepath
 
     except Exception as e:
         print(f"Error: {e}")
@@ -113,27 +107,28 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
 
 
 
-
 def process(image, bg):
     image_size = image.size
     input_images = transform_image(image).unsqueeze(0).to("cuda")
+    # Prediction
     with torch.no_grad():
         preds = birefnet(input_images)[-1].sigmoid().cpu()
     pred = preds[0].squeeze()
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
 
-    if isinstance(bg, str) and bg.startswith("#"):  # If bg is a color
+    if isinstance(bg, str) and bg.startswith("#"):
         color_rgb = tuple(int(bg[i:i+2], 16) for i in (1, 3, 5))
-        background = Image.new("RGBA", image_size, color_rgb + (255,)) # Create image with color
+        background = Image.new("RGBA", image_size, color_rgb + (255,))
     elif isinstance(bg, Image.Image):
-        background = bg.convert("RGBA").resize(image_size) #Resize if bg is an image
-    else: #If bg is an image path
-        background = Image.open(bg).convert("RGBA").resize(image_size) # Open and resize image
+        background = bg.convert("RGBA").resize(image_size)
+    else:
+        background = Image.open(bg).convert("RGBA").resize(image_size)
 
+    # Composite the image onto the background using the mask
     image = Image.composite(image, background, mask)
-    return image
 
+    return image
 
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
