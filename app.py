@@ -139,8 +139,14 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
                 threads = [] # Reset the threads list
 
             elapsed_time = time.time() - start_time
-            # Yield the first processed image from the current batch
-            yield processed_frames[-len(threads) if threads else -frame_batch_size], None, f"Processing frame {i+1}... Elapsed time: {elapsed_time:.2f} seconds"
+            
+            # Yield the first processed image from the current batch if available
+            if processed_frames:
+                index = -len(threads) if threads else -min(frame_batch_size, len(processed_frames))
+                yield processed_frames[index], None, f"Processing frame {i+1}... Elapsed time: {elapsed_time:.2f} seconds"
+            else:
+                yield None, None, f"Processing frame {i+1}... Elapsed time: {elapsed_time:.2f} seconds"
+
 
         # Create a new video from the processed frames
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
