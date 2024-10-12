@@ -64,6 +64,8 @@ cleanup_thread.start()
 @spaces.GPU
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=False):
     try:
+        start_time = time.time()  # Start the timer
+
         # Load the video using moviepy
         video = mp.VideoFileClip(vid)
 
@@ -79,7 +81,7 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
 
         # Process each frame for background removal
         processed_frames = []
-        yield gr.update(visible=True), gr.update(visible=False)
+        yield gr.update(visible=True), gr.update(visible=False), f"Processing started... Elapsed time: 0 seconds"
 
         if bg_type == "Video":
             background_video = mp.VideoFileClip(bg_video)
@@ -115,7 +117,8 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
                 processed_image = pil_image  # Default to original image if no background is selected
 
             processed_frames.append(np.array(processed_image))
-            yield processed_image, None
+            elapsed_time = time.time() - start_time
+            yield processed_image, None, f"Processing frame {i+1}... Elapsed time: {elapsed_time:.2f} seconds"
 
         # Create a new video from the processed frames
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
@@ -130,14 +133,16 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         temp_filepath = os.path.join(temp_dir, unique_filename)
         processed_video.write_videofile(temp_filepath, codec="libx264")
 
-        yield gr.update(visible=False), gr.update(visible=True)
+        elapsed_time = time.time() - start_time
+        yield gr.update(visible=False), gr.update(visible=True), f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
         # Return the path to the temporary file
-        yield processed_image, temp_filepath
+        yield processed_image, temp_filepath, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
 
     except Exception as e:
         print(f"Error: {e}")
-        yield gr.update(visible=False), gr.update(visible=True)
-        yield None, f"Error processing video: {e}"
+        elapsed_time = time.time() - start_time
+        yield gr.update(visible=False), gr.update(visible=True), f"Error processing video: {e}. Elapsed time: {elapsed_time:.2f} seconds"
+        yield None, f"Error processing video: {e}", f"Error processing video: {e}. Elapsed time: {elapsed_time:.2f} seconds"
 
 
 def process(image, bg, fast_mode=False):
@@ -192,6 +197,7 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
             video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down", interactive=True)
         fast_mode_checkbox = gr.Checkbox(label="Fast Mode (Use BiRefNet_lite)", value=False, interactive=True)
 
+    time_textbox = gr.Textbox(label="Time Elapsed", interactive=False) # Add time textbox
 
     def update_visibility(bg_type):
         if bg_type == "Color":
@@ -214,7 +220,7 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
             ["rickroll-2sec.mp4", "Color", None, None],
         ],
         inputs=[in_video, bg_type, bg_image, bg_video],
-        outputs=[stream_image, out_video],
+        outputs=[stream_image, out_video, time_textbox],
         fn=fn,
         cache_examples=True,
         cache_mode="eager",
@@ -224,7 +230,7 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     submit_button.click(
         fn,
         inputs=[in_video, bg_type, bg_image, bg_video, color_picker, fps_slider, video_handling_radio, fast_mode_checkbox],
-        outputs=[stream_image, out_video],
+        outputs=[stream_image, out_video, time_textbox],
     )
 
 if __name__ == "__main__":
