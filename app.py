@@ -206,10 +206,10 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     )
 
 if __name__ == "__main__":
+    demo.launch(show_error=True)
+    
     schedule.every(10).minutes.do(clear_temp_directory)
 
     while True:
         schedule.run_pending()
         time.sleep(1)
-
-    demo.launch(show_error=True)
