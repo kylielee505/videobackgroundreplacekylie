@@ -13,6 +13,7 @@ import tempfile
 import uuid
 import time
 import threading
+from queue import Queue
 
 torch.set_float32_matmul_precision("medium")
 
@@ -61,10 +62,16 @@ cleanup_thread = threading.Thread(target=cleanup_temp_files, daemon=True)
 cleanup_thread.start()
 
 
+# Function to process frames in a separate thread
+def process_frame(image, bg, fast_mode, result_queue):
+    processed_image = process(image, bg, fast_mode)
+    result_queue.put(processed_image)
+
+
 @spaces.GPU
-def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=False):
+def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True):
     try:
-        start_time = time.time()  # Start the timer
+        start_time = time.time()
 
         # Load the video using moviepy
         video = mp.VideoFileClip(vid)
@@ -96,29 +103,44 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
 
         bg_frame_index = 0  # Initialize background frame index
 
+        threads = []
+        result_queue = Queue()
+        frame_batch_size = 4 # Process 4 frames at a time
+
         for i, frame in enumerate(frames):
             pil_image = Image.fromarray(frame)
             if bg_type == "Color":
-                processed_image = process(pil_image, color, fast_mode)
+                background_image = color # Use color directly for threads
             elif bg_type == "Image":
-                processed_image = process(pil_image, bg_image, fast_mode)
+                background_image = bg_image
             elif bg_type == "Video":
                 if video_handling == "slow_down":
                     background_frame = background_frames[bg_frame_index % len(background_frames)]
                     bg_frame_index += 1
                     background_image = Image.fromarray(background_frame)
-                    processed_image = process(pil_image, background_image, fast_mode)
                 else:  # video_handling == "loop"
                     background_frame = background_frames[bg_frame_index % len(background_frames)]
                     bg_frame_index += 1
                     background_image = Image.fromarray(background_frame)
-                    processed_image = process(pil_image, background_image, fast_mode)
             else:
-                processed_image = pil_image  # Default to original image if no background is selected
+                background_image = None  # Default to no background
 
-            processed_frames.append(np.array(processed_image))
+            # Start a new thread to process the frame
+            thread = threading.Thread(target=process_frame, args=(pil_image, background_image, fast_mode, result_queue))
+            threads.append(thread)
+            thread.start()
+
+            # If we have enough threads running or it's the last frame, wait for results
+            if len(threads) == frame_batch_size or i == len(list(frames)) - 1:
+                for thread in threads:
+                    thread.join()
+                while not result_queue.empty():
+                    processed_frames.append(np.array(result_queue.get()))
+                threads = [] # Reset the threads list
+
             elapsed_time = time.time() - start_time
-            yield processed_image, None, f"Processing frame {i+1}... Elapsed time: {elapsed_time:.2f} seconds"
+            # Yield the first processed image from the current batch
+            yield processed_frames[-len(threads) if threads else -frame_batch_size], None, f"Processing frame {i+1}... Elapsed time: {elapsed_time:.2f} seconds"
 
         # Create a new video from the processed frames
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
@@ -136,7 +158,7 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         elapsed_time = time.time() - start_time
         yield gr.update(visible=False), gr.update(visible=True), f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
         # Return the path to the temporary file
-        yield processed_image, temp_filepath, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
+        yield processed_frames[-1], temp_filepath, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
 
     except Exception as e:
         print(f"Error: {e}")
@@ -195,7 +217,7 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
         bg_video = gr.Video(label="Background Video", visible=False, interactive=True)
         with gr.Column(visible=False) as video_handling_options:
             video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down", interactive=True)
-        fast_mode_checkbox = gr.Checkbox(label="Fast Mode (Use BiRefNet_lite)", value=False, interactive=True)
+        fast_mode_checkbox = gr.Checkbox(label="Fast Mode (Use BiRefNet_lite)", value=True, interactive=True)
 
     time_textbox = gr.Textbox(label="Time Elapsed", interactive=False) # Add time textbox
 
