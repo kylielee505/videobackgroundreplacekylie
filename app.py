@@ -11,18 +11,24 @@ import numpy as np
 import os
 import tempfile
 import uuid
-import schedule
 import time
-import shutil
+import threading
 
 torch.set_float32_matmul_precision("medium")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Load both BiRefNet models
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
 )
 birefnet.to(device)
+
+birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
+    "ZhengPeng7/BiRefNet_lite", trust_remote_code=True
+)
+birefnet_lite.to(device)
+
 transform_image = transforms.Compose(
     [
         transforms.Resize((1024, 1024)),
@@ -32,8 +38,31 @@ transform_image = transforms.Compose(
 )
 
 
+# Function to delete files older than 10 minutes in the temp directory
+def cleanup_temp_files():
+    while True:
+        temp_dir = "temp"
+        if os.path.exists(temp_dir):
+            for filename in os.listdir(temp_dir):
+                filepath = os.path.join(temp_dir, filename)
+                if os.path.isfile(filepath):
+                    file_age = time.time() - os.path.getmtime(filepath)
+                    if file_age > 600:  # 10 minutes in seconds
+                        try:
+                            os.remove(filepath)
+                            print(f"Deleted temporary file: {filepath}")
+                        except Exception as e:
+                            print(f"Error deleting file {filepath}: {e}")
+        time.sleep(60)  # Check every minute
+
+
+# Start the cleanup thread
+cleanup_thread = threading.Thread(target=cleanup_temp_files, daemon=True)
+cleanup_thread.start()
+
+
 @spaces.GPU
-def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down"):
+def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=False):
     try:
         # Load the video using moviepy
         video = mp.VideoFileClip(vid)
@@ -68,20 +97,20 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         for i, frame in enumerate(frames):
             pil_image = Image.fromarray(frame)
             if bg_type == "Color":
-                processed_image = process(pil_image, color)
+                processed_image = process(pil_image, color, fast_mode)
             elif bg_type == "Image":
-                processed_image = process(pil_image, bg_image)
+                processed_image = process(pil_image, bg_image, fast_mode)
             elif bg_type == "Video":
                 if video_handling == "slow_down":
                     background_frame = background_frames[bg_frame_index % len(background_frames)]
                     bg_frame_index += 1
                     background_image = Image.fromarray(background_frame)
-                    processed_image = process(pil_image, background_image)
+                    processed_image = process(pil_image, background_image, fast_mode)
                 else:  # video_handling == "loop"
                     background_frame = background_frames[bg_frame_index % len(background_frames)]
                     bg_frame_index += 1
                     background_image = Image.fromarray(background_frame)
-                    processed_image = process(pil_image, background_image)
+                    processed_image = process(pil_image, background_image, fast_mode)
             else:
                 processed_image = pil_image  # Default to original image if no background is selected
 
@@ -111,13 +140,16 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         yield None, f"Error processing video: {e}"
 
 
-
-def process(image, bg):
+def process(image, bg, fast_mode=False):
     image_size = image.size
     input_images = transform_image(image).unsqueeze(0).to("cuda")
+
+    # Select the model based on fast_mode
+    model = birefnet_lite if fast_mode else birefnet
+
     # Prediction
     with torch.no_grad():
-        preds = birefnet(input_images)[-1].sigmoid().cpu()
+        preds = model(input_images)[-1].sigmoid().cpu()
     pred = preds[0].squeeze()
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
@@ -134,18 +166,6 @@ def process(image, bg):
     image = Image.composite(image, background, mask)
 
     return image
-
-def clear_temp_directory():
-    temp_dir = "temp"
-    for filename in os.listdir(temp_dir):
-        file_path = os.path.join(temp_dir, filename)
-        try:
-            if os.path.isfile(file_path) or os.path.islink(file_path):
-                os.unlink(file_path)
-            elif os.path.isdir(file_path):
-                shutil.rmtree(file_path)
-        except Exception as e:
-            print('Failed to delete %s. Reason: %s' % (file_path, e)) # Keep this print statement for debugging purposes
 
 
 with gr.Blocks(theme=gr.themes.Ocean()) as demo:
@@ -170,6 +190,8 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
         bg_video = gr.Video(label="Background Video", visible=False, interactive=True)
         with gr.Column(visible=False) as video_handling_options:
             video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down", interactive=True)
+        fast_mode_checkbox = gr.Checkbox(label="Fast Mode (Use BiRefNet_lite)", value=False, interactive=True)
+
 
     def update_visibility(bg_type):
         if bg_type == "Color":
@@ -201,15 +223,9 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
 
     submit_button.click(
         fn,
-        inputs=[in_video, bg_type, bg_image, bg_video, color_picker, fps_slider, video_handling_radio],
+        inputs=[in_video, bg_type, bg_image, bg_video, color_picker, fps_slider, video_handling_radio, fast_mode_checkbox],
         outputs=[stream_image, out_video],
     )
 
 if __name__ == "__main__":
     demo.launch(show_error=True)
-    
-    schedule.every(10).minutes.do(clear_temp_directory)
-
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
