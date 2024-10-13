@@ -76,7 +76,7 @@ def process_frame(frame, bg_type, bg, fast_mode, bg_frame_index, background_fram
         return frame, bg_frame_index
 
 @spaces.GPU
-def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True):
+def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True, max_workers=8):
     try:
         start_time = time.time()  # Start the timer
 
@@ -110,8 +110,8 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
 
         bg_frame_index = 0  # Initialize background frame index
 
-        # Use ThreadPoolExecutor for parallel processing
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        # Use ThreadPoolExecutor for parallel processing with specified max_workers
+        with ThreadPoolExecutor(max_workers=min(max_workers, 32)) as executor: # Limit max_workers to 32
             futures = [executor.submit(process_frame, frames[i], bg_type, bg_image, fast_mode, bg_frame_index, background_frames, color) for i in range(len(frames))]
             for future in futures:
                 result, bg_frame_index = future.result()
@@ -193,6 +193,8 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
         with gr.Column(visible=False) as video_handling_options:
             video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down", interactive=True)
         fast_mode_checkbox = gr.Checkbox(label="Fast Mode (Use BiRefNet_lite)", value=True, interactive=True)
+        max_workers_slider = gr.Slider( minimum=1, maximum=32, step=1, value=8, label="Max Workers", info="Determines how many Franes to process parallel", interactive=True
+        )
     time_textbox = gr.Textbox(label="Time Elapsed", interactive=False)  # Add time textbox
 
     def update_visibility(bg_type):
@@ -225,7 +227,7 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
 
     submit_button.click(
         fn,
-        inputs=[in_video, bg_type, bg_image, bg_video, color_picker, fps_slider, video_handling_radio, fast_mode_checkbox],
+        inputs=[in_video, bg_type, bg_image, bg_video, color_picker, fps_slider, video_handling_radio, fast_mode_checkbox, max_workers_slider],
         outputs=[stream_image, out_video, time_textbox],
     )
 
