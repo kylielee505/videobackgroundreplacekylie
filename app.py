@@ -13,17 +13,14 @@ import tempfile
 import uuid
 import time
 from concurrent.futures import ThreadPoolExecutor
-import asyncio
 
 torch.set_float32_matmul_precision("medium")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Load both BiRefNet models
-birefnet = AutoModelForImageSegmentation.from_pretrained(
-    "ZhengPeng7/BiRefNet", trust_remote_code=True)
+birefnet = AutoModelForImageSegmentation.from_pretrained("ZhengPeng7/BiRefNet", trust_remote_code=True)
 birefnet.to(device)
-birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
-    "ZhengPeng7/BiRefNet_lite", trust_remote_code=True)
+birefnet_lite = AutoModelForImageSegmentation.from_pretrained("ZhengPeng7/BiRefNet_lite", trust_remote_code=True)
 birefnet_lite.to(device)
 
 transform_image = transforms.Compose([
@@ -32,74 +29,77 @@ transform_image = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 ])
 
-# Function to process a single frame asynchronously
-async def process_frame_async(frame, bg_type, bg, fast_mode, bg_frame_index, background_frames, color):
-    pil_image = Image.fromarray(frame)
-    if bg_type == "Color":
-        processed_image = process(pil_image, color, fast_mode)
-    elif bg_type == "Image":
-        processed_image = process(pil_image, bg, fast_mode)
-    elif bg_type == "Video":
-        background_frame = background_frames[bg_frame_index % len(background_frames)]
-        bg_frame_index += 1
-        background_image = Image.fromarray(background_frame)
-        processed_image = process(pil_image, background_image, fast_mode)
-    else:
-        processed_image = pil_image  # Default to original image if no background is selected
-    return np.array(processed_image), bg_frame_index
+# Function to process a single frame
+def process_frame(frame, bg_type, bg, fast_mode, bg_frame_index, background_frames, color):
+    try:
+        pil_image = Image.fromarray(frame)
+        if bg_type == "Color":
+            processed_image = process(pil_image, color, fast_mode)
+        elif bg_type == "Image":
+            processed_image = process(pil_image, bg, fast_mode)
+        elif bg_type == "Video":
+            background_frame = background_frames[bg_frame_index % len(background_frames)]
+            bg_frame_index += 1
+            background_image = Image.fromarray(background_frame)
+            processed_image = process(pil_image, background_image, fast_mode)
+        else:
+            processed_image = pil_image  # Default to original image if no background is selected
+        return np.array(processed_image), bg_frame_index
+    except Exception as e:
+        print(f"Error processing frame: {e}")
+        return frame, bg_frame_index
 
 @spaces.GPU
-async def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True, max_workers=6):
-    start_time = time.time()  # Start the timer
-    
-    video = mp.VideoFileClip(vid)
-    if fps == 0:
-        fps = video.fps
-    
-    audio = video.audio
-    frames = list(video.iter_frames(fps=fps))
-    
-    processed_frames = []
-    yield gr.update(visible=True), gr.update(visible=False), f"Processing started... Elapsed time: 0 seconds"
-    
-    if bg_type == "Video":
-        background_video = mp.VideoFileClip(bg_video)
-        if background_video.duration < video.duration:
-            if video_handling == "slow_down":
-                background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
-            else:  # video_handling == "loop"
-                background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
-        background_frames = list(background_video.iter_frames(fps=fps))
-    else:
-        background_frames = None
+def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True, max_workers=6):
+    try:
+        start_time = time.time()  # Start the timer
+        video = mp.VideoFileClip(vid)
+        if fps == 0:
+            fps = video.fps
+        
+        audio = video.audio
+        frames = list(video.iter_frames(fps=fps))
+        
+        processed_frames = []
+        yield gr.update(visible=True), gr.update(visible=False), f"Processing started... Elapsed time: 0 seconds"
+        
+        if bg_type == "Video":
+            background_video = mp.VideoFileClip(bg_video)
+            if background_video.duration < video.duration:
+                if video_handling == "slow_down":
+                    background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
+                else:  # video_handling == "loop"
+                    background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
+            background_frames = list(background_video.iter_frames(fps=fps))
+        else:
+            background_frames = None
+        
+        bg_frame_index = 0  # Initialize background frame index
 
-    bg_frame_index = 0
-
-    # Use ThreadPoolExecutor for parallel processing with specified max_workers
-    loop = asyncio.get_event_loop()
-    tasks = [
-        loop.run_in_executor(
-            None, process_frame_async, frames[i], bg_type, bg_image, fast_mode, bg_frame_index, background_frames, color
-        )
-        for i in range(len(frames))
-    ]
-    
-    for future in asyncio.as_completed(tasks):
-        result, bg_frame_index = await future
-        processed_frames.append(result)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_frame, frames[i], bg_type, bg_image, fast_mode, bg_frame_index, background_frames, color) for i in range(len(frames))]
+            for future in futures:
+                result, bg_frame_index = future.result()
+                processed_frames.append(result)
+                elapsed_time = time.time() - start_time
+                yield result, None, f"Processing frame {len(processed_frames)}... Elapsed time: {elapsed_time:.2f} seconds"
+        
+        processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
+        processed_video = processed_video.set_audio(audio)
+        
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
+            temp_filepath = temp_file.name
+            processed_video.write_videofile(temp_filepath, codec="libx264")
+        
         elapsed_time = time.time() - start_time
-        yield result, None, f"Processing frame {len(processed_frames)}... Elapsed time: {elapsed_time:.2f} seconds"
+        yield gr.update(visible=False), gr.update(visible=True), f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
+        yield processed_frames[-1], temp_filepath, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
     
-    processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
-    processed_video = processed_video.set_audio(audio)
-    
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
-        temp_filepath = temp_file.name
-        processed_video.write_videofile(temp_filepath, codec="libx264")
-    
-    elapsed_time = time.time() - start_time
-    yield gr.update(visible=False), gr.update(visible=True), f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
-    yield processed_frames[-1], temp_filepath, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
+    except Exception as e:
+        print(f"Error: {e}")
+        elapsed_time = time.time() - start_time
+        yield gr.update(visible=False), gr.update(visible=True), f"Error processing video: {e}. Elapsed time: {elapsed_time:.2f} seconds"
+        yield None, f"Error processing video: {e}", f"Error processing video: {e}. Elapsed time: {elapsed_time:.2f} seconds"
 
 def process(image, bg, fast_mode=False):
     image_size = image.size
