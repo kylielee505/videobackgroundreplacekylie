@@ -1,4 +1,4 @@
- import gradio as gr
+import gradio as gr
 from loadimg import load_img
 import spaces
 from transformers import AutoModelForImageSegmentation
