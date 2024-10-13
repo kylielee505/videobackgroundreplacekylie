@@ -34,27 +34,6 @@ transform_image = transforms.Compose(
     ]
 )
 
-# Function to delete files older than 10 minutes in the temp directory
-def cleanup_temp_files():
-    while True:
-        temp_dir = "temp"
-        if os.path.exists(temp_dir):
-            for filename in os.listdir(temp_dir):
-                filepath = os.path.join(temp_dir, filename)
-                if os.path.isfile(filepath):
-                    file_age = time.time() - os.path.getmtime(filepath)
-                    if file_age > 600:  # 10 minutes in seconds
-                        try:
-                            os.remove(filepath)
-                            print(f"Deleted temporary file: {filepath}")
-                        except Exception as e:
-                            print(f"Error deleting file {filepath}: {e}")
-        time.sleep(60)  # Check every minute
-
-# Start the cleanup thread
-cleanup_thread = threading.Thread(target=cleanup_temp_files, daemon=True)
-cleanup_thread.start()
-
 # Function to process a single frame
 def process_frame(frame, bg_type, bg, fast_mode, bg_frame_index, background_frames, color):
     try:
@@ -111,13 +90,13 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         bg_frame_index = 0  # Initialize background frame index
 
         # Use ThreadPoolExecutor for parallel processing with specified max_workers
-        with ThreadPoolExecutor(max_workers=min(max_workers, 32)) as executor: # Limit max_workers to 32
+        with ThreadPoolExecutor(max_workers=max_workers) as executor: 
             futures = [executor.submit(process_frame, frames[i], bg_type, bg_image, fast_mode, bg_frame_index, background_frames, color) for i in range(len(frames))]
             for future in futures:
                 result, bg_frame_index = future.result()
                 processed_frames.append(result)
-                elapsed_time = time.time() - start_time
-                yield result, None, f"Processing frame {len(processed_frames)}... Elapsed time: {elapsed_time:.2f} seconds"
+            elapsed_time = time.time() - start_time
+            yield result, None, f"Processing frame {len(processed_frames)}... Elapsed time: {elapsed_time:.2f} seconds"
 
         # Create a new video from the processed frames
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
@@ -125,12 +104,10 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         # Add the original audio back to the processed video
         processed_video = processed_video.set_audio(audio)
 
-        # Save the processed video to a temporary file
-        temp_dir = "temp"
-        os.makedirs(temp_dir, exist_ok=True)
-        unique_filename = str(uuid.uuid4()) + ".mp4"
-        temp_filepath = os.path.join(temp_dir, unique_filename)
-        processed_video.write_videofile(temp_filepath, codec="libx264")
+        # Save the processed video to a temporary file using tempfile
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
+            temp_filepath = temp_file.name
+            processed_video.write_videofile(temp_filepath, codec="libx264")
 
         elapsed_time = time.time() - start_time
         yield gr.update(visible=False), gr.update(visible=True), f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
