@@ -55,7 +55,7 @@ def process_frame(frame, bg_type, bg, fast_mode, bg_frame_index, background_fram
         return frame, bg_frame_index
 
 @spaces.GPU
-def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True, max_workers=5):
+def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True, max_workers=6):
     try:
         start_time = time.time()  # Start the timer
 
@@ -170,7 +170,7 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
         with gr.Column(visible=False) as video_handling_options:
             video_handling_radio = gr.Radio(["slow_down", "loop"], label="Video Handling", value="slow_down", interactive=True)
         fast_mode_checkbox = gr.Checkbox(label="Fast Mode (Use BiRefNet_lite)", value=True, interactive=True)
-        max_workers_slider = gr.Slider( minimum=1, maximum=32, step=1, value=5, label="Max Workers", info="Determines how many Franes to process parallel", interactive=True
+        max_workers_slider = gr.Slider( minimum=1, maximum=32, step=1, value=6, label="Max Workers", info="Determines how many Franes to process parallel", interactive=True
         )
     time_textbox = gr.Textbox(label="Time Elapsed", interactive=False)  # Add time textbox
 
