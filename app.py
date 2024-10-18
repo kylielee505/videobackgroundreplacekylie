@@ -38,7 +38,7 @@ def process_frame(frame, bg_type, bg, fast_mode, bg_frame_index, background_fram
         elif bg_type == "Image":
             processed_image = process(pil_image, bg, fast_mode)
         elif bg_type == "Video":
-            background_frame = background_frames[bg_frame_index % len(background_frames)]
+            background_frame = background_frames[bg_frame_index]  # Access the correct background frame
             bg_frame_index += 1
             background_image = Image.fromarray(background_frame)
             processed_image = process(pil_image, background_image, fast_mode)
@@ -77,12 +77,13 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         bg_frame_index = 0  # Initialize background frame index
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(process_frame, frames[i], bg_type, bg_image, fast_mode, bg_frame_index, background_frames, color) for i in range(len(frames))]
-            for future in futures:
-                result, bg_frame_index = future.result()
+            # Pass bg_frame_index as part of the function arguments
+            futures = [executor.submit(process_frame, frames[i], bg_type, bg_image, fast_mode, bg_frame_index + i, background_frames, color) for i in range(len(frames))] 
+            for i, future in enumerate(futures):
+                result, _ = future.result() #  No need to update bg_frame_index here
                 processed_frames.append(result)
                 elapsed_time = time.time() - start_time
-                yield result, None, f"Processing frame {len(processed_frames)}... Elapsed time: {elapsed_time:.2f} seconds"
+                yield result, None, f"Processing frame {i+1}/{len(frames)}... Elapsed time: {elapsed_time:.2f} seconds"
         
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
         processed_video = processed_video.set_audio(audio)
