@@ -9,7 +9,7 @@ from pydub import AudioSegment
 from PIL import Image
 import numpy as np
 import os
-import tempfile
+import io
 import uuid
 import time
 from concurrent.futures import ThreadPoolExecutor
