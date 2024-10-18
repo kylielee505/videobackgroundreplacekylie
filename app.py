@@ -87,20 +87,16 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         
         processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
         processed_video = processed_video.set_audio(audio)
-        
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
-            temp_filepath = temp_file.name
-            processed_video.write_videofile(temp_filepath, codec="libx264")
+
+        # Write the video to an in-memory bytes buffer
+        buf = io.BytesIO()
+        processed_video.write_videofile(buf, codec="libx264")
+        buf.seek(0)
         
         elapsed_time = time.time() - start_time
         yield gr.update(visible=False), gr.update(visible=True), f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
         
-        try:
-            yield processed_frames[-1], temp_filepath, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
-        finally:
-            # Ensure the file is deleted after yielding the result
-            os.remove(temp_filepath)
-            print(f"Temporary file deleted: {temp_filepath}")
+        yield processed_frames[-1], buf, f"Processing complete! Elapsed time: {elapsed_time:.2f} seconds"
     
     except Exception as e:
         print(f"Error: {e}")
