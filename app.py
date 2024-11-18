@@ -188,4 +188,4 @@ with gr.Blocks(theme=gr.themes.Ocean()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(show_error=True)
+    demo.launch(show_error=True, share=True)
